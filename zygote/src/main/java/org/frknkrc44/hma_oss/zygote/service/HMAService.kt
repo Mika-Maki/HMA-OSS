@@ -128,6 +128,7 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
                     logWithLevel(level, "AppPresets", msg = msg)
                 }
                 loadPresetCache()
+                writeUidFilterLists()   // 配置与 preset 都就绪后再写 uid 名单
 
                 managerWorkMode = Constants.MANAGER_WORK_MODE_OK
             }
@@ -221,6 +222,7 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
                 keep.add(f.name)
             }
             dir.listFiles()?.forEach { if (it.name !in keep) it.delete() }
+            logI(TAG) { "uid lists written: scope=${config.scope.size} pkgs=$installed".let { _ -> "uid lists written: scope=${config.scope.size} installed=${installed.size} files=${keep.size}" } }
         } catch (cause: Throwable) {
             logE(TAG, cause) { "Failed to write uid filter lists" }
         }
@@ -235,7 +237,6 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
 
             ensureFileIsRW(moduleStatusFile, true)
             moduleStatusFile.writeText(encoder.encodeToString(json))
-            writeUidFilterLists()   // 启动/状态刷新时同步一次 uid 名单
         } catch (cause: Throwable) {
             logE(TAG, cause) { "An error occurred while writing the status JSON" }
         }
