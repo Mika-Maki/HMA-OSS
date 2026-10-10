@@ -199,12 +199,15 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
     fun writeUidFilterLists() {
         try {
             val dir = File(dataDir, "uids").apply { mkdirs() }
-            val installed = pms.getInstalledPackages(PackageManager.MATCH_ALL.toLong(), 0)?.list ?: emptyList()
+            val installed: List<String> = try {
+                pms.allPackages ?: emptyList()
+            } catch (cause: Throwable) {
+                emptyList()
+            }
             val keep = HashSet<String>()
             for (caller in config.scope.keys) {
                 val hidden = ArrayList<Int>()
-                for (pi in installed) {
-                    val name = pi.packageName
+                for (name in installed) {
                     if (!shouldHide(caller, name, 0)) continue
                     val uid = try {
                         pms.getPackageUid(name, 0L, 0)
