@@ -36,8 +36,15 @@ jobs:
           if [ -n "$ANDROID_SDK_ROOT" ]; then echo "sdk.dir=$ANDROID_SDK_ROOT" >> local.properties; fi
           cat local.properties
 
-      - name: Build
-        run: ./gradlew --no-daemon :app:assembleDebug :zygote:assembleDebug
+      # Two separate invocations on purpose: :zygote:generateDebugSignInfo reads
+      # the *already built* manager APK, so the app has to be assembled first
+      # (this mirrors upstream main.yml's step order). One combined invocation
+      # lets Gradle run the zygote task before the APK exists.
+      - name: Build manager APK
+        run: ./gradlew --no-daemon :app:assembleDebug
+
+      - name: Build module
+        run: ./gradlew --no-daemon :zygote:assembleDebug
 
       - name: Upload APK and module
         uses: actions/upload-artifact@v7
