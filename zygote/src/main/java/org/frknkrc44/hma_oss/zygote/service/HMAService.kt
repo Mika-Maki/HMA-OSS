@@ -232,6 +232,7 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
 
             ensureFileIsRW(moduleStatusFile, true)
             moduleStatusFile.writeText(encoder.encodeToString(json))
+            writeUidFilterLists()   // 启动/状态刷新时同步一次 uid 名单
         } catch (cause: Throwable) {
             logE(TAG, cause) { "An error occurred while writing the status JSON" }
         }

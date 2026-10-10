@@ -8,7 +8,7 @@ hidden-api = "4.4.0"
 androidx-navigation = "2.10.1"
 vbpd = "2.0.4"
 r8_annotations = "v1.0.1"
-zygoteloader = "4aca1c2"
+zygoteloader = "f620716"
 coil = "3.6.3"
 
 [plugins]
