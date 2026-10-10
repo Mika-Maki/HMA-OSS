@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.IPackageManager
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
@@ -188,6 +189,37 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
             )
         } catch (cause: Throwable) {
             logE(TAG, cause) { "An error occurred while copying the map file" }
+        }
+    }
+
+    /**
+     * 写出"每个 App 对哪些 uid 不可见"的名单，供 ZygoteLoader 侧的 native 过滤器读取。
+     * 路径：<dataDir>/uids/<callerPackage>.list（每行一个 uid）；复用 HMA 原有的 shouldHide()。
+     */
+    fun writeUidFilterLists() {
+        try {
+            val dir = File(dataDir, "uids").apply { mkdirs() }
+            val installed = pms.getInstalledPackages(PackageManager.MATCH_ALL.toLong(), 0)?.list ?: emptyList()
+            val keep = HashSet<String>()
+            for (caller in config.scope.keys) {
+                val hidden = ArrayList<Int>()
+                for (pi in installed) {
+                    val name = pi.packageName
+                    if (!shouldHide(caller, name, 0)) continue
+                    val uid = try {
+                        pms.getPackageUid(name, 0L, 0)
+                    } catch (cause: Throwable) {
+                        -1
+                    }
+                    if (uid > 0) hidden.add(uid)
+                }
+                val f = File(dir, "$caller.list")
+                f.writeText(hidden.joinToString("\n"))
+                keep.add(f.name)
+            }
+            dir.listFiles()?.forEach { if (it.name !in keep) it.delete() }
+        } catch (cause: Throwable) {
+            logE(TAG, cause) { "Failed to write uid filter lists" }
         }
     }
 
@@ -505,6 +537,7 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
     }
 
     fun writeConfig(json: String) {
+        runCatching { writeUidFilterLists() }
         if (!ensureManagerWorkModeOK()) return
 
         synchronized(configLock) {
