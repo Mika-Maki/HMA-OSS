@@ -96,7 +96,8 @@ fun addManagerApp(variant: String) {
 
 zygisk {
     // 注入所有进程：普通 App 进程只装 native UID 过滤器（按 HMA 名单），system_server 才加载 dex
-    packages(ZygoteLoader.PACKAGE_SYSTEM_SERVER, ZygoteLoader.ALL_PACKAGES)
+    // 只放 .all：shouldEnable() 是「异或」判据，同时放 android 与 .all 会让 system_server 变成「禁用」
+    packages(ZygoteLoader.ALL_PACKAGES)
 
     // module properties
     id = "hma_oss_zygisk"
