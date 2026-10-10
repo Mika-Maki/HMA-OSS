@@ -198,12 +198,6 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
      * 路径：<dataDir>/uids/<callerPackage>.list（每行一个 uid）；复用 HMA 原有的 shouldHide()。
      */
     fun writeUidFilterLists() {
-        // 无条件先落地一个"我跑过"的证据：三个数就能区分 调用没到 / scope 为空 / 枚举为空
-        try {
-            File(File(dataDir, "uids").apply { mkdirs() }, "_ran.txt")
-                .writeText("ts=${System.currentTimeMillis()} scope=${config.scope.size}\n")
-        } catch (cause: Throwable) {
-        }
         try {
             val dir = File(dataDir, "uids").apply { mkdirs() }
             val installed: List<String> = try {
@@ -211,27 +205,37 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
             } catch (cause: Throwable) {
                 emptyList()
             }
-            File(dir, "_ran.txt").writeText(
-                "ts=${System.currentTimeMillis()} scope=${config.scope.size} installed=${installed.size}\n"
-            )
+            val callers = LinkedHashSet<String>()
+            callers.addAll(config.scope.keys)
+            callers.addAll(observedHidden.keys)
             val keep = HashSet<String>()
-            for (caller in config.scope.keys) {
-                val hidden = ArrayList<Int>()
-                for (name in installed) {
-                    if (!shouldHide(caller, name, 0)) continue
+            var totalUids = 0
+            for (caller in callers) {
+                val pkgs = HashSet<String>()
+                observedHidden[caller]?.let { set -> synchronized(set) { pkgs.addAll(set) } }
+                // 观察不到的调用方，再用 shouldHide 枚举一遍（模板类配置在服务侧可解析）
+                if (pkgs.isEmpty() && installed.isNotEmpty()) {
+                    for (name in installed) if (shouldHideImpl(caller, name, 0)) pkgs.add(name)
+                }
+                val uids = ArrayList<Int>()
+                for (name in pkgs) {
                     val uid = try {
                         pms.getPackageUid(name, 0L, 0)
                     } catch (cause: Throwable) {
                         -1
                     }
-                    if (uid > 0) hidden.add(uid)
+                    if (uid > 0) uids.add(uid)
                 }
-                val f = File(dir, "$caller.list")
-                f.writeText(hidden.joinToString("\n"))
-                keep.add(f.name)
+                File(dir, "$caller.list").writeText(uids.joinToString("\n"))
+                keep.add("$caller.list")
+                totalUids += uids.size
             }
-            dir.listFiles()?.forEach { if (it.name !in keep) it.delete() }
-            logI(TAG) { "uid lists written: scope=${config.scope.size} pkgs=$installed".let { _ -> "uid lists written: scope=${config.scope.size} installed=${installed.size} files=${keep.size}" } }
+            dir.listFiles()?.forEach { if (it.name !in keep && !it.name.startsWith("_")) it.delete() }
+            File(dir, "_ran.txt").writeText(
+                "ts=${System.currentTimeMillis()} scope=${config.scope.size} " +
+                    "observed=${observedHidden.size} files=${keep.size} uids=$totalUids installed=${installed.size}\n"
+            )
+            logI(TAG) { "uid lists written: scope=${config.scope.size} observed=${observedHidden.size} uids=$totalUids" }
         } catch (cause: Throwable) {
             runCatching {
                 File(File(dataDir, "uids"), "_error.txt").writeText(cause.stackTraceToString())
@@ -441,7 +445,37 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
     fun isAppInGMSIgnoredPackages(caller: String, query: String) =
         (caller in Constants.gmsPackages) && RiskyPackageUtils.instance.appHasGMSConnection(query)
 
+    // ===== UID 名单：直接记录 HMA 的"真实判定"，不依赖 preset 在服务侧能否解析 =====
+    private val observedHidden = java.util.concurrent.ConcurrentHashMap<String, MutableSet<String>>()
+    private val lastFlushAt = java.util.concurrent.atomic.AtomicLong(0L)
+
+    /** 所有钩子都经过这里：先拿真实判定，再把"确实要隐藏"的 (caller, query) 记下来。 */
     fun shouldHide(caller: String?, query: String?, userId: Int): Boolean {
+        val result = shouldHideImpl(caller, query, userId)
+        if (result && caller != null && query != null) {
+            observedHidden
+                .getOrPut(caller) { java.util.Collections.synchronizedSet(HashSet<String>()) }
+                .add(query)
+            maybeFlushUidLists()
+        }
+        return result
+    }
+
+    /** 节流 + 放到独立线程：绝不在 PMS 钩子路径上做文件 IO。 */
+    private fun maybeFlushUidLists() {
+        val now = android.os.SystemClock.elapsedRealtime()
+        val prev = lastFlushAt.get()
+        if (now - prev < 5000L) return
+        if (!lastFlushAt.compareAndSet(prev, now)) return
+        Thread {
+            try {
+                writeUidFilterLists()
+            } catch (cause: Throwable) {
+            }
+        }.start()
+    }
+
+    private fun shouldHideImpl(caller: String?, query: String?, userId: Int): Boolean {
         if (caller == null || query == null) return false
         if (caller == BuildConfig.APP_PACKAGE_NAME) return false
         if (caller in Constants.packagesShouldNotHide || query in Constants.packagesShouldNotHide) return false
