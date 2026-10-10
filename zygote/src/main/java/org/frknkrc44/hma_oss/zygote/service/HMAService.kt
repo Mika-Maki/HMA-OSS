@@ -198,6 +198,12 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
      * 路径：<dataDir>/uids/<callerPackage>.list（每行一个 uid）；复用 HMA 原有的 shouldHide()。
      */
     fun writeUidFilterLists() {
+        // 无条件先落地一个"我跑过"的证据：三个数就能区分 调用没到 / scope 为空 / 枚举为空
+        try {
+            File(File(dataDir, "uids").apply { mkdirs() }, "_ran.txt")
+                .writeText("ts=${System.currentTimeMillis()} scope=${config.scope.size}\n")
+        } catch (cause: Throwable) {
+        }
         try {
             val dir = File(dataDir, "uids").apply { mkdirs() }
             val installed: List<String> = try {
@@ -205,6 +211,9 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
             } catch (cause: Throwable) {
                 emptyList()
             }
+            File(dir, "_ran.txt").writeText(
+                "ts=${System.currentTimeMillis()} scope=${config.scope.size} installed=${installed.size}\n"
+            )
             val keep = HashSet<String>()
             for (caller in config.scope.keys) {
                 val hidden = ArrayList<Int>()
@@ -224,6 +233,9 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
             dir.listFiles()?.forEach { if (it.name !in keep) it.delete() }
             logI(TAG) { "uid lists written: scope=${config.scope.size} pkgs=$installed".let { _ -> "uid lists written: scope=${config.scope.size} installed=${installed.size} files=${keep.size}" } }
         } catch (cause: Throwable) {
+            runCatching {
+                File(File(dataDir, "uids"), "_error.txt").writeText(cause.stackTraceToString())
+            }
             logE(TAG, cause) { "Failed to write uid filter lists" }
         }
     }
