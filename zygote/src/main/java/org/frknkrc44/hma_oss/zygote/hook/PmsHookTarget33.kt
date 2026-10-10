@@ -14,6 +14,7 @@ import org.frknkrc44.hma_oss.zygote.util.ZLUtils.findMethod
 import org.frknkrc44.hma_oss.zygote.util.ZLUtils.getArgument
 import org.frknkrc44.hma_oss.zygote.util.ZygoteConstants.APPS_FILTER_IMPL_CLASS
 import org.frknkrc44.hma_oss.zygote.util.ZygoteConstants.COMPUTER_ENGINE_CLASS
+import org.frknkrc44.hma_oss.zygote.util.ZygoteConstants.PACKAGE_MANAGER_SERVICE_CLASS
 
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 open class PmsHookTarget33 : PmsHookTargetBase() {
@@ -88,6 +89,39 @@ open class PmsHookTarget33 : PmsHookTargetBase() {
                     returnValue,
                     { frame.args.firstOrNullWithType() },
                     { frame.args.firstOrNullWithType() },
+                    ::getCallingApps,
+                    null,
+                )
+            }
+
+            // The uid <-> package mapping has to be hidden as well: getPackageUid()
+            // hands out the uid of a hidden package, and getNameForUid() turns a uid
+            // (e.g. one enumerated from /proc or cgroupfs) back into a package name.
+            // Without these a caller can build "this uid is running but no package is
+            // visible" evidence and flag the hidden app list as active.
+            hookAfter(
+                PACKAGE_MANAGER_SERVICE_CLASS,
+                "getPackageUid",
+            ) { methodName, frame, returnValue ->
+                applyPackageHiding(
+                    methodName,
+                    returnValue,
+                    { Binder.getCallingUid() },
+                    { frame.getArgument(1) as? String },
+                    ::getCallingApps,
+                    -1,
+                )
+            }
+
+            hookAfter(
+                PACKAGE_MANAGER_SERVICE_CLASS,
+                "getNameForUid",
+            ) { methodName, frame, returnValue ->
+                applyPackageHiding(
+                    methodName,
+                    returnValue,
+                    { Binder.getCallingUid() },
+                    { returnValue.result as? String },
                     ::getCallingApps,
                     null,
                 )
