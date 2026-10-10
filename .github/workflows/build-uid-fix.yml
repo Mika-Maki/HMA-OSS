@@ -1,0 +1,49 @@
+name: Build UID mapping fix
+
+on:
+  push:
+    branches:
+      - fix/uid-mapping-hiding
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build debug APK and module
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: 'recursive'
+          fetch-depth: 0
+
+      - name: Gradle wrapper validation
+        uses: gradle/actions/wrapper-validation@v6
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      # Local development publishes this file via git-ignore, and upstream's
+      # main.yml only writes it on pushes to master, so a branch build needs it.
+      - name: Ensure local.properties
+        run: |
+          touch local.properties
+          if [ -n "$ANDROID_SDK_ROOT" ]; then echo "sdk.dir=$ANDROID_SDK_ROOT" >> local.properties; fi
+          cat local.properties
+
+      - name: Build
+        run: ./gradlew --no-daemon :app:assembleDebug :zygote:assembleDebug
+
+      - name: Upload APK and module
+        uses: actions/upload-artifact@v7
+        with:
+          name: hma-uid-mapping-fix
+          if-no-files-found: error
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            zygote/build/outputs/magisk/debug/*.zip
